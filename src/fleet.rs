@@ -151,3 +151,37 @@ pub fn plan_upgrade(
         members: statuses,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hex_formatting_is_lowercase_and_padded() {
+        assert_eq!(to_hex(&[0x10, 0xc0, 0x09, 0xff]), "10c009ff");
+    }
+
+    #[test]
+    fn describes_wasm_executable_with_full_hash() {
+        let text = describe_executable(&ContractExecutable::Wasm(Hash([0xab; 32])));
+        assert_eq!(text, format!("Wasm hash {}", "ab".repeat(32)));
+    }
+
+    #[test]
+    fn describes_stellar_asset_executable() {
+        let text = describe_executable(&ContractExecutable::StellarAsset);
+        assert!(text.contains("Stellar asset"));
+    }
+
+    #[test]
+    fn plan_rejects_a_short_hash_before_any_network_call() {
+        let result = plan_upgrade(
+            "http://127.0.0.1:1",
+            "CCSC3UOXCCNB3VV7MM2P63IPNVKHQQ3TUMBCIW6OW42F75FBGMI4Y3VA",
+            "fleetwatch-demo",
+            "abc",
+            &[],
+        );
+        assert!(result.is_err());
+    }
+}
