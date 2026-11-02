@@ -81,3 +81,73 @@ pub fn get_tag_value(rpc_url: &str, owner_id: &str, tag: &str) -> Result<ScVal, 
         _ => Err("entry is not contract data".to_string()),
     }
 }
+
+pub fn get_tag_hash(rpc_url: &str, owner_id: &str, tag: &str) -> Result<String, String> {
+    match get_tag_value(rpc_url, owner_id, tag)? {
+        ScVal::Bytes(bytes) => Ok(to_hex(bytes.0.as_slice())),
+        other => Err(format!("tag holds an unexpected value: {other:?}")),
+    }
+}
+
+pub struct MemberStatus {
+    pub contract_id: String,
+    pub in_fleet: bool,
+    pub detail: String,
+}
+
+pub struct UpgradePlan {
+    pub owner: String,
+    pub tag: String,
+    pub current_hash: String,
+    pub new_hash: String,
+    pub already_current: bool,
+    pub members: Vec<MemberStatus>,
+}
+
+pub fn plan_upgrade(
+    rpc_url: &str,
+    owner_id: &str,
+    tag: &str,
+    new_hash: &str,
+    members: &[String],
+) -> Result<UpgradePlan, String> {
+    let new_hash = new_hash.to_lowercase();
+    if new_hash.len() != 64 || !new_hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("new hash must be 64 hex characters".to_string());
+    }
+    let current_hash = get_tag_hash(rpc_url, owner_id, tag)?;
+    let mut statuses = Vec::new();
+    for contract_id in members {
+        let status = match get_contract_executable(rpc_url, contract_id) {
+            Ok(ContractExecutable::ExternalRef(r))
+                if owner_text(&r.executable_owner) == owner_id
+                    && r.tag.to_utf8_string_lossy() == tag =>
+            {
+                MemberStatus {
+                    contract_id: contract_id.clone(),
+                    in_fleet: true,
+                    detail: "points at this owner and tag".to_string(),
+                }
+            }
+            Ok(other) => MemberStatus {
+                contract_id: contract_id.clone(),
+                in_fleet: false,
+                detail: describe_executable(&other),
+            },
+            Err(e) => MemberStatus {
+                contract_id: contract_id.clone(),
+                in_fleet: false,
+                detail: format!("error: {e}"),
+            },
+        };
+        statuses.push(status);
+    }
+    Ok(UpgradePlan {
+        owner: owner_id.to_string(),
+        tag: tag.to_string(),
+        already_current: current_hash == new_hash,
+        current_hash,
+        new_hash,
+        members: statuses,
+    })
+}
