@@ -54,3 +54,30 @@ pub fn describe_executable(executable: &ContractExecutable) -> String {
         ),
     }
 }
+
+pub fn get_tag_value(rpc_url: &str, owner_id: &str, tag: &str) -> Result<ScVal, String> {
+    let owner = stellar_strkey::Contract::from_string(owner_id)
+        .map_err(|e| format!("bad owner id: {e:?}"))?;
+    let tag_string = stellar_xdr::ScString(
+        tag.as_bytes()
+            .to_vec()
+            .try_into()
+            .map_err(|_| "tag is too long".to_string())?,
+    );
+    let key = LedgerKey::ContractData(LedgerKeyContractData {
+        contract: ScAddress::Contract(ContractId(Hash(owner.0))),
+        key: ScVal::ExecutableTag(tag_string),
+        durability: ContractDataDurability::Persistent,
+    });
+    let key_xdr = key
+        .to_xdr_base64(Limits::none())
+        .map_err(|e| e.to_string())?;
+    let entry_xdr = crate::rpc::get_ledger_entry_xdr(rpc_url, &key_xdr)?
+        .ok_or_else(|| "tag entry not found on this network".to_string())?;
+    let data = LedgerEntryData::from_xdr_base64(entry_xdr, Limits::none())
+        .map_err(|e| e.to_string())?;
+    match data {
+        LedgerEntryData::ContractData(entry) => Ok(entry.val),
+        _ => Err("entry is not contract data".to_string()),
+    }
+}
