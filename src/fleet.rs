@@ -185,3 +185,63 @@ mod tests {
         assert!(result.is_err());
     }
 }
+
+pub struct VerifyReport {
+    pub expected_hash: String,
+    pub tag_hash: String,
+    pub tag_matches: bool,
+    pub members: Vec<MemberStatus>,
+    pub ok: bool,
+}
+
+fn check_member(rpc_url: &str, contract_id: &str, owner_id: &str, tag: &str) -> MemberStatus {
+    match get_contract_executable(rpc_url, contract_id) {
+        Ok(ContractExecutable::ExternalRef(r))
+            if owner_text(&r.executable_owner) == owner_id
+                && r.tag.to_utf8_string_lossy() == tag =>
+        {
+            MemberStatus {
+                contract_id: contract_id.to_string(),
+                in_fleet: true,
+                detail: "points at this owner and tag".to_string(),
+            }
+        }
+        Ok(other) => MemberStatus {
+            contract_id: contract_id.to_string(),
+            in_fleet: false,
+            detail: describe_executable(&other),
+        },
+        Err(e) => MemberStatus {
+            contract_id: contract_id.to_string(),
+            in_fleet: false,
+            detail: format!("error: {e}"),
+        },
+    }
+}
+
+pub fn verify_fleet(
+    rpc_url: &str,
+    owner_id: &str,
+    tag: &str,
+    expected_hash: &str,
+    members: &[String],
+) -> Result<VerifyReport, String> {
+    let expected_hash = expected_hash.to_lowercase();
+    if expected_hash.len() != 64 || !expected_hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("expected hash must be 64 hex characters".to_string());
+    }
+    let tag_hash = get_tag_hash(rpc_url, owner_id, tag)?;
+    let statuses: Vec<MemberStatus> = members
+        .iter()
+        .map(|id| check_member(rpc_url, id, owner_id, tag))
+        .collect();
+    let tag_matches = tag_hash == expected_hash;
+    let ok = tag_matches && statuses.iter().all(|m| m.in_fleet);
+    Ok(VerifyReport {
+        expected_hash,
+        tag_hash,
+        tag_matches,
+        members: statuses,
+        ok,
+    })
+}
